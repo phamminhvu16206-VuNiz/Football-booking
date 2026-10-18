@@ -4,9 +4,12 @@ const router = express.Router();
 // 1. Import các hàm từ Controller
 const { 
     createBooking, 
+    getMyBookings,
+    getBookingById,
+    getBookingPaymentInfo,
+    cancelBooking,
     getBookedSlots, 
     checkPaymentStatus, 
-    updatePaymentStatus, 
     handleSepayWebhook 
 } = require('../controllers/bookingController');
 
@@ -18,7 +21,10 @@ router.get('/booked-slots', getBookedSlots);
 router.post('/webhook', handleSepayWebhook);
 
 router.post('/', protect, createBooking);
-router.get('/:id/payment-status', protect, checkPaymentStatus); // Dòng 16
-router.put('/:id/payment', protect, updatePaymentStatus);
+router.get('/my-bookings', protect, getMyBookings);
+router.get('/:id/payment-status', protect, checkPaymentStatus);
+router.get('/:id/payment-info', protect, getBookingPaymentInfo);
+router.put('/:id/cancel', protect, cancelBooking);
+router.get('/:id', protect, getBookingById);
 
 module.exports = router;

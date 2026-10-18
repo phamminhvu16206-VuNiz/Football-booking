@@ -1,6 +1,7 @@
 const Booking = require('../models/Booking');
 const Field = require('../models/Field');
 const User = require('../models/User');
+const withBookingDateLock = require('../utils/withBookingDateLock');
 
 // @desc    Lấy danh sách tất cả lịch đặt sân (Admin)
 // @route   GET /api/admin/bookings
@@ -40,10 +41,10 @@ const confirmBooking = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Không tìm thấy đơn đặt sân' });
         }
 
-        if (booking.status !== 'PENDING') {
+        if (booking.status !== 'PENDING' || booking.paymentStatus !== 'PAID') {
             return res.status(400).json({
                 success: false,
-                message: `Đơn đặt sân hiện đang ở trạng thái ${booking.status}, không thể xác nhận`,
+                message: 'Chỉ có thể xác nhận đơn đã thanh toán và đang chờ xử lý',
             });
         }
 
@@ -65,30 +66,39 @@ const confirmBooking = async (req, res) => {
 // @access  Private/Admin
 const rejectBooking = async (req, res) => {
     try {
-        const booking = await Booking.findById(req.params.id);
-
-        if (!booking) {
+        const initialBooking = await Booking.findById(req.params.id);
+        if (!initialBooking) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy đơn đặt sân' });
         }
 
-        if (booking.status !== 'PENDING' && booking.status !== 'CONFIRMED') {
-            return res.status(400).json({
-                success: false,
-                message: 'Không thể hủy/từ chối đơn ở trạng thái này',
-            });
-        }
+        const result = await withBookingDateLock(initialBooking.field, initialBooking.bookingDate, async () => {
+            const booking = await Booking.findById(req.params.id);
+            if (!booking) {
+                return { status: 404, message: 'Không tìm thấy đơn đặt sân' };
+            }
+            if (booking.status !== 'PENDING' && booking.status !== 'CONFIRMED') {
+                return { status: 400, message: 'Không thể hủy/từ chối đơn ở trạng thái này' };
+            }
 
-        booking.status = 'CANCELLED';
-        if (req.body.note) {
-            booking.note = `[Admin Từ chối]: ${req.body.note}`;
-        }
-        await booking.save();
-
-        res.json({
-            success: true,
-            message: 'Đã từ chối/hủy đơn đặt sân',
-            data: booking,
+            booking.status = 'CANCELLED';
+            if (booking.paymentStatus === 'PAID') {
+                booking.paymentStatus = 'REFUND_PENDING';
+            }
+            booking.holdExpiresAt = null;
+            if (req.body.note) {
+                booking.note = `${booking.note ? `${booking.note}\n` : ''}[Admin Từ chối]: ${req.body.note}`;
+            }
+            await booking.save();
+            return { status: 200, booking };
         });
+
+        if (!result.acquired) {
+            return res.status(409).json({ success: false, message: 'Đang xử lý lịch đặt này, vui lòng thử lại' });
+        }
+        if (result.value.status !== 200) {
+            return res.status(result.value.status).json({ success: false, message: result.value.message });
+        }
+        res.json({ success: true, message: 'Đã từ chối/hủy đơn đặt sân', data: result.value.booking });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
@@ -105,6 +115,13 @@ const completeBooking = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Không tìm thấy đơn đặt sân' });
         }
 
+        if (booking.status !== 'CONFIRMED' || booking.paymentStatus !== 'PAID') {
+            return res.status(400).json({
+                success: false,
+                message: 'Chỉ có thể hoàn thành đơn đã thanh toán và được xác nhận',
+            });
+        }
+
         booking.status = 'COMPLETED';
         await booking.save();
 
@@ -113,6 +130,41 @@ const completeBooking = async (req, res) => {
             message: 'Đã hoàn thành trận đấu',
             data: booking,
         });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const completeRefund = async (req, res) => {
+    try {
+        const initialBooking = await Booking.findById(req.params.id);
+        if (!initialBooking) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy đơn đặt sân' });
+        }
+
+        const result = await withBookingDateLock(initialBooking.field, initialBooking.bookingDate, async () => {
+            const booking = await Booking.findById(req.params.id);
+            if (!booking) {
+                return { status: 404, message: 'Không tìm thấy đơn đặt sân' };
+            }
+            if (booking.status !== 'CANCELLED' || booking.paymentStatus !== 'REFUND_PENDING') {
+                return { status: 400, message: 'Đơn này không chờ hoàn tiền' };
+            }
+
+            booking.paymentStatus = 'REFUNDED';
+            booking.refundedAt = new Date();
+            booking.refundedBy = req.user._id;
+            await booking.save();
+            return { status: 200, booking };
+        });
+
+        if (!result.acquired) {
+            return res.status(409).json({ success: false, message: 'Đang xử lý lịch đặt này, vui lòng thử lại' });
+        }
+        if (result.value.status !== 200) {
+            return res.status(result.value.status).json({ success: false, message: result.value.message });
+        }
+        res.json({ success: true, message: 'Đã ghi nhận hoàn tiền thành công', data: result.value.booking });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
@@ -136,9 +188,7 @@ const getDashboardStats = async (req, res) => {
 
         // 3. Tính tổng doanh thu từ các đơn CONFIRMED và COMPLETED
         const revenueData = await Booking.aggregate([
-            {
-                $match: { status: { $in: ['CONFIRMED', 'COMPLETED'] } },
-            },
+            { $match: { paymentStatus: 'PAID', status: { $ne: 'CANCELLED' } } },
             {
                 $group: {
                     _id: null,
@@ -174,5 +224,6 @@ module.exports = {
     confirmBooking,
     rejectBooking,
     completeBooking,
+    completeRefund,
     getDashboardStats,
 };

@@ -2,7 +2,7 @@ const Field = require('../models/Field');
 
 const getFields = async (req, res) => {
     try {
-        const { keyword, type, status, page = 1, limit = 10 } = req.query;
+        const { keyword, type, status, sort = 'newest', page = 1, limit = 10 } = req.query;
         let query = {};
 
         if (keyword) {
@@ -20,10 +20,16 @@ const getFields = async (req, res) => {
         const pageNum = parseInt(page, 10);
         const limitNum = parseInt(limit, 10);
         const skip = (pageNum - 1) * limitNum;
+        const sortOptions = {
+            newest: { createdAt: -1 },
+            price_asc: { price: 1, _id: 1 },
+            price_desc: { price: -1, _id: 1 },
+        };
+        const sortOrder = sortOptions[sort] || sortOptions.newest;
 
         const totalFields = await Field.countDocuments(query);
         const fields = await Field.find(query)
-            .sort({ createdAt: -1 })
+            .sort(sortOrder)
             .skip(skip)
             .limit(limitNum);
 

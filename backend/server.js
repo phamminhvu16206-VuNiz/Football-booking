@@ -15,6 +15,7 @@ const adminRoutes = require('./routes/adminRoutes.js');
 const initBookingCronJob = require('./jobs/bookingJob');
 
 dotenv.config();
+require('./utils/bookingHoldMinutes')();
 connectDB();
 
 const app = express();

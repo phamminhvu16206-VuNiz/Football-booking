@@ -33,9 +33,21 @@ const userSchema = new mongoose.Schema(
             enum: ['ACTIVE', 'BLOCKED'],
             default: 'ACTIVE',
         },
+        tokenVersion: {
+            type: Number,
+            default: 0,
+        },
         avatar: { 
             type: String, default: '' 
-        }
+        },
+        passwordResetToken: {
+            type: String,
+            select: false,
+        },
+        passwordResetExpires: {
+            type: Date,
+            select: false,
+        },
     },
     {
         timestamps: true, // Tự động tạo createdAt và updatedAt

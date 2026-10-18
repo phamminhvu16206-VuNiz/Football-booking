@@ -36,6 +36,37 @@ const bookingSchema = new mongoose.Schema(
             type: Number,
             required: true,
         },
+        paymentMethod: {
+            type: String,
+            enum: ['BANK_TRANSFER'],
+            default: 'BANK_TRANSFER',
+        },
+        paymentStatus: {
+            type: String,
+            enum: ['PENDING', 'PAID', 'REFUND_PENDING', 'REFUNDED'],
+            default: 'PENDING',
+        },
+        holdExpiresAt: {
+            type: Date,
+            default: null,
+        },
+        paymentAmount: {
+            type: Number,
+            default: 0,
+        },
+        sepayTransactionId: {
+            type: String,
+            default: undefined,
+        },
+        refundedAt: {
+            type: Date,
+            default: null,
+        },
+        refundedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null,
+        },
         status: {
             type: String,
             enum: ['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED'],
@@ -49,6 +80,11 @@ const bookingSchema = new mongoose.Schema(
     {
         timestamps: true,
     }
+);
+
+bookingSchema.index(
+    { sepayTransactionId: 1 },
+    { unique: true, sparse: true, name: 'unique_sepay_transaction' }
 );
 
 module.exports = mongoose.model('Booking', bookingSchema);

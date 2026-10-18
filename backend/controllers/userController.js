@@ -1,9 +1,10 @@
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
+const generateToken = require('../utils/generateToken');
 
 const getUserProfile = async (req, res) => {
     try {
-        const user = await User.findById(req.user._id).select('-password');
+        const user = await User.findById(req.user._id).select('-password -tokenVersion');
         if (!user) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng' });
         }
@@ -48,15 +49,19 @@ const changePassword = async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
 
-        if (!currentPassword || !newPassword) {
+        if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' ||
+            !currentPassword || !newPassword) {
             return res.status(400).json({ success: false, message: 'Vui lòng nhập đầy đủ mật khẩu cũ và mật khẩu mới' });
         }
 
-        if (newPassword.length < 6) {
+        if (typeof newPassword !== 'string' || newPassword.length < 6) {
             return res.status(400).json({ success: false, message: 'Mật khẩu mới phải có ít nhất 6 ký tự' });
         }
 
         const user = await User.findById(req.user._id);
+        if (!user) {
+            return res.status(400).json({ success: false, message: 'Mật khẩu hiện tại không chính xác' });
+        }
 
         // 1. Kiểm tra mật khẩu cũ có đúng không
         const isMatch = await bcrypt.compare(currentPassword, user.password);
@@ -67,9 +72,14 @@ const changePassword = async (req, res) => {
         // 2. Hash mật khẩu mới và lưu vào CSDL
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(newPassword, salt);
+        user.tokenVersion = (user.tokenVersion || 0) + 1;
         await user.save();
 
-        res.json({ success: true, message: 'Đổi mật khẩu thành công' });
+        res.json({
+            success: true,
+            message: 'Đổi mật khẩu thành công',
+            token: generateToken(user._id, user.tokenVersion),
+        });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
@@ -100,7 +110,7 @@ const deleteMyAccount = async (req, res) => {
 const getUsers = async (req, res) => {
     try {
         // Lấy tất cả user ngoại trừ password, sắp xếp mới nhất lên đầu
-        const users = await User.find({}).select('-password').sort({ createdAt: -1 });
+        const users = await User.find({}).select('-password -tokenVersion').sort({ createdAt: -1 });
         res.json({ success: true, count: users.length, data: users });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -112,7 +122,7 @@ const getUsers = async (req, res) => {
 // @access  Private/Admin
 const getUserById = async (req, res) => {
     try {
-        const user = await User.findById(req.params.id).select('-password');
+        const user = await User.findById(req.params.id).select('-password -tokenVersion');
         if (!user) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng' });
         }

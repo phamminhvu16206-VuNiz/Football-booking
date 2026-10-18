@@ -5,6 +5,7 @@ const {
     confirmBooking,
     rejectBooking,
     completeBooking,
+    completeRefund,
     getDashboardStats,
 } = require('../controllers/adminController');
 const { protect, admin } = require('../middleware/authMiddleware');
@@ -20,5 +21,6 @@ router.get('/bookings', getAllBookings);
 router.put('/bookings/:id/confirm', confirmBooking);
 router.put('/bookings/:id/reject', rejectBooking);
 router.put('/bookings/:id/complete', completeBooking);
+router.put('/bookings/:id/refund-complete', completeRefund);
 
 module.exports = router;

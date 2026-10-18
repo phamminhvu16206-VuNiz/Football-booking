@@ -53,7 +53,7 @@ const seedData = async () => {
                 address: '123 Đường Số 1, Quận 10, TP.HCM',
                 description: 'Sân cỏ nhân tạo mềm, có mái che ban đêm, đèn LED cực sáng.',
                 price: 200000,
-                image: 'https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=600',
+                image: '/san5.jpg',
                 status: 'AVAILABLE'
             },
             {
@@ -62,7 +62,7 @@ const seedData = async () => {
                 address: '456 Đường Nguyễn Văn Linh, Quận 7, TP.HCM',
                 description: 'Sân 7 chuẩn kích thước FIFA, không gian thoáng mát.',
                 price: 350000,
-                image: 'https://images.unsplash.com/photo-1575361204480-aadea25e6e68?w=600',
+                image: '/san7.jpg',
                 status: 'AVAILABLE'
             },
             {
@@ -71,7 +71,7 @@ const seedData = async () => {
                 address: '789 Đường Lê Lợi, TP. Thủ Đức',
                 description: 'Sân cỏ tự nhiên tiêu chuẩn thi đấu chuyên nghiệp.',
                 price: 800000,
-                image: 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=600',
+                image: '/san11.jpg',
                 status: 'AVAILABLE'
             }
         ]);

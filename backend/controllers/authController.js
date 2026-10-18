@@ -1,6 +1,97 @@
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const generateToken = require('../utils/generateToken');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
+
+const getMailTransporter = () => {
+    const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
+    if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS) {
+        return null;
+    }
+
+    return nodemailer.createTransport({
+        host: SMTP_HOST,
+        port: Number(SMTP_PORT),
+        secure: Number(SMTP_PORT) === 465,
+        auth: { user: SMTP_USER, pass: SMTP_PASS },
+    });
+};
+
+const requestPasswordReset = async (req, res) => {
+    try {
+        const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+        if (!email) {
+            return res.status(400).json({ success: false, message: 'Vui lòng nhập email' });
+        }
+
+        const transporter = getMailTransporter();
+        if (!transporter || !process.env.SMTP_FROM || !process.env.FRONTEND_URL) {
+            return res.status(503).json({ success: false, message: 'Chức năng đặt lại mật khẩu chưa được cấu hình email' });
+        }
+
+        const user = await User.findOne({ email });
+        if (user) {
+            const resetToken = crypto.randomBytes(32).toString('hex');
+            user.passwordResetToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+            user.passwordResetExpires = new Date(Date.now() + 60 * 60 * 1000);
+            await user.save();
+
+            const resetUrl = new URL('/forgot-password', process.env.FRONTEND_URL);
+            resetUrl.searchParams.set('token', resetToken);
+            try {
+                await transporter.sendMail({
+                    from: process.env.SMTP_FROM,
+                    to: user.email,
+                    subject: 'Đặt lại mật khẩu Football Booking',
+                    text: `Dùng liên kết sau để đặt lại mật khẩu trong vòng 60 phút: ${resetUrl.toString()}`,
+                    html: `<p>Liên kết đặt lại mật khẩu có hiệu lực trong 60 phút:</p><p><a href="${resetUrl.toString()}">Đặt lại mật khẩu</a></p>`,
+                });
+            } catch (error) {
+                user.passwordResetToken = undefined;
+                user.passwordResetExpires = undefined;
+                await user.save();
+                console.error('Không gửi được email đặt lại mật khẩu:', error.message);
+                return res.status(503).json({ success: false, message: 'Không thể gửi email đặt lại mật khẩu lúc này' });
+            }
+        }
+
+        res.json({
+            success: true,
+            message: 'Nếu email đã đăng ký, hướng dẫn đặt lại mật khẩu sẽ được gửi đến hộp thư.',
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const resetPassword = async (req, res) => {
+    try {
+        const { token, password } = req.body;
+        if (typeof token !== 'string' || !token || typeof password !== 'string' || password.length < 6) {
+            return res.status(400).json({ success: false, message: 'Mã đặt lại không hợp lệ hoặc mật khẩu dưới 6 ký tự' });
+        }
+
+        const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+        const passwordHash = await bcrypt.hash(password, 10);
+        const user = await User.findOneAndUpdate({
+            passwordResetToken: hashedToken,
+            passwordResetExpires: { $gt: new Date() },
+        }, {
+            $set: { password: passwordHash },
+            $inc: { tokenVersion: 1 },
+            $unset: { passwordResetToken: 1, passwordResetExpires: 1 },
+        }, { new: true });
+
+        if (!user) {
+            return res.status(400).json({ success: false, message: 'Mã đặt lại không hợp lệ hoặc đã hết hạn' });
+        }
+
+        res.json({ success: true, message: 'Đặt lại mật khẩu thành công. Bạn có thể đăng nhập.' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
 
 // @desc    Đăng ký tài khoản
 // @route   POST /api/auth/register
@@ -42,7 +133,7 @@ const register = async (req, res) => {
                     email: user.email,
                     phone: user.phone,
                     role: user.role,
-                    token: generateToken(user._id),
+                    token: generateToken(user._id, user.tokenVersion),
                     avatar: user.avatar || '/images/default-avatar.png'
                 },
             });
@@ -90,7 +181,7 @@ const login = async (req, res) => {
                     email: user.email,
                     phone: user.phone,
                     role: user.role,
-                    token: generateToken(user._id),
+                    token: generateToken(user._id, user.tokenVersion),
                     avatar: user.avatar || '/images/default-avatar.png'
                 },
             });
@@ -107,7 +198,7 @@ const login = async (req, res) => {
 // @access  Private (Cần Token)
 const getMe = async (req, res) => {
     try {
-        const user = await User.findById(req.user._id).select('-password');
+        const user = await User.findById(req.user._id).select('-password -tokenVersion');
         res.json({
             success: true,
             data: user,
@@ -121,4 +212,6 @@ module.exports = {
     register,
     login,
     getMe,
+    requestPasswordReset,
+    resetPassword,
 };

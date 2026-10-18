@@ -1,5 +1,6 @@
 const cron = require('node-cron');
 const Booking = require('../models/Booking');
+const getBookingHoldMinutes = require('../utils/bookingHoldMinutes');
 
 const timeToMinutes = (timeStr) => {
     const [hours, minutes] = timeStr.split(':').map(Number);
@@ -8,23 +9,59 @@ const timeToMinutes = (timeStr) => {
 
 // Hàm khởi tạo Cron Job
 const initBookingCronJob = () => {
-    // Lập lịch chạy mỗi 15 phút một lần: '*/15 * * * *'
+    cron.schedule('* * * * *', async () => {
+        try {
+            const now = new Date();
+            const legacyHoldCutoff = new Date(now.getTime() - getBookingHoldMinutes() * 60 * 1000);
+            const expiredHolds = await Booking.updateMany(
+                {
+                    status: 'PENDING',
+                    paymentStatus: 'PENDING',
+                    $or: [
+                        { holdExpiresAt: { $lte: now } },
+                        {
+                            holdExpiresAt: null,
+                            createdAt: { $lte: legacyHoldCutoff },
+                        },
+                    ],
+                },
+                {
+                    $set: {
+                        status: 'CANCELLED',
+                        holdExpiresAt: null,
+                    },
+                }
+            );
+            if (expiredHolds.modifiedCount > 0) {
+                console.log(`Đã tự hủy ${expiredHolds.modifiedCount} đơn hết hạn giữ chỗ.`);
+            }
+        } catch (error) {
+            console.error('[CRON JOB ERROR - EXPIRED HOLDS]:', error.message);
+        }
+    });
+
     cron.schedule('*/15 * * * *', async () => {
         try {
             console.log('⏰ [CRON JOB] Đang kiểm tra các lịch đặt sân đã qua giờ đá...');
-
             // 1. Lấy thời gian hiện tại
             const now = new Date();
-            const year = now.getFullYear();
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const day = String(now.getDate()).padStart(2, '0');
-
-            const currentDateStr = `${year}-${month}-${day}`; // Dạng 'YYYY-MM-DD'
-            const currentMinutes = now.getHours() * 60 + now.getMinutes(); // Số phút hiện tại trong ngày
+            const currentDateStr = new Intl.DateTimeFormat('sv-SE', {
+                timeZone: 'Asia/Ho_Chi_Minh',
+            }).format(now);
+            const timeParts = new Intl.DateTimeFormat('en-GB', {
+                timeZone: 'Asia/Ho_Chi_Minh',
+                hour: '2-digit',
+                minute: '2-digit',
+                hourCycle: 'h23',
+            }).formatToParts(now);
+            const currentHour = Number(timeParts.find((part) => part.type === 'hour').value);
+            const currentMinute = Number(timeParts.find((part) => part.type === 'minute').value);
+            const currentMinutes = currentHour * 60 + currentMinute;
 
             // 2. Tìm tất cả đơn CONFIRMED có ngày đặt nhỏ hơn hoặc bằng ngày hiện tại
             const confirmedBookings = await Booking.find({
                 status: 'CONFIRMED',
+                paymentStatus: 'PAID',
                 bookingDate: { $lte: currentDateStr },
             });
 
@@ -53,7 +90,7 @@ const initBookingCronJob = () => {
         } catch (error) {
             console.error('❌ [CRON JOB ERROR]:', error.message);
         }
-    });
+    }, { timezone: 'Asia/Ho_Chi_Minh' });
 };
 
 module.exports = initBookingCronJob;

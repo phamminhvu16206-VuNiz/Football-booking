@@ -24,6 +24,10 @@ const protect = async (req, res, next) => {
                 return res.status(401).json({ success: false, message: 'Người dùng không tồn tại' });
             }
 
+            if ((decoded.tokenVersion || 0) !== (req.user.tokenVersion || 0)) {
+                return res.status(401).json({ success: false, message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' });
+            }
+
             if (req.user.status === 'BLOCKED') {
                 return res.status(403).json({ success: false, message: 'Tài khoản của bạn đã bị khóa' });
             }
